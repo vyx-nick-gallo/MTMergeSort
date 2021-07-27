@@ -97,55 +97,51 @@ struct stat sb;
 
 int main(int argc, char ** argv) {
 
-    //initialize filedecriptor and stat structure
-    int i;
-    int filedescrip;
+	//initialize filedecriptor and stat structure
+	int i;
+	int filedescrip;
 
-    //number of arguments in command line: program, thread number, and file name
-    if(argc != 3) {
-        printf("Wrong amount of arguments.\n");
-        exit(EXIT_FAILURE);
-    }
+	//number of arguments in command line: program, thread number, and file name
+	if(argc != 3) {
+		printf("Wrong amount of arguments.\n");
+		exit(EXIT_FAILURE);
+	}
 
-    Threadnum = atoi(argv[1]);
-    filedescrip = open(argv[2], O_RDWR);
+	Threadnum = atoi(argv[1]);
+	filedescrip = open(argv[2], O_RDWR);
 
-    if(filedescrip < 0) {
-        printf("File open failed.\n");
-        exit(EXIT_FAILURE);
-    }
-    if(fstat(filedescrip, &sb) < 0) {
-        printf("fstat error.\n");
-        exit(EXIT_FAILURE);
-    }
+	if(filedescrip < 0) {
+		printf("File open failed.\n");
+		exit(EXIT_FAILURE);
+	}
+	if(fstat(filedescrip, &sb) < 0) {
+		printf("fstat error.\n");
+		exit(EXIT_FAILURE);
+	}
 
-    //file is mapped to pointer array of object records
-    records = mmap(NULL, sb.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, filedescrip, 0);
+	//file is mapped to pointer array of object records
+	records = mmap(NULL, sb.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, filedescrip, 0);
 
-    if(records == MAP_FAILED) {
-        printf("mmap failed.\n");
-        exit(EXIT_FAILURE);
-    }
+	if(records == MAP_FAILED) {
+		printf("mmap failed.\n");
+		exit(EXIT_FAILURE);
+	}
 
-    //temp array is identical in size and type to original
-    temprecord = (record*)malloc(sb.st_size);
-
-    //number of items in file and subitems for each thread to be sorted
-
-    int items = sb.st_size/objln;
+	//temp array is identical in size and type to original
+	temprecord = (record*)malloc(sb.st_size);
+	//number of items in file and subitems for each thread to be sorted
+	int items = sb.st_size/objln;
 	int subitm = items/Threadnum;
-    printf("Items: %d\nThreads: %d\n", items, Threadnum);
-	
+	printf("Items: %d\nThreads: %d\n", items, Threadnum);
 	//intialize the value for the amount of stages that the algorithms runs through 
-    int runs = 0;
-
+	int runs = 0;
 	//initialize thread number to be used, which is halved after each run in the loop is completed until it reaches 0
-    int thread;
-	
+	int thread;
+
 	if(Threadnum == 1) {
 		thread = Threadnum;
 	}
-	else if(Threadnum % 2 == 0) {
+		else if(Threadnum % 2 == 0) {
 		thread = Threadnum/2;
 	}
 	else {
@@ -154,134 +150,107 @@ int main(int argc, char ** argv) {
 	}
 
 	//begin time at start of algorithm after file is mapped
-    clock_t begin = clock();
-	
+	clock_t begin = clock();
+
 	//begin driver loop in main
-    do {
+	do {
 
 		//dynamic arrays for thread parameters and threads, updating after each run is complete
 		printf("stage %d\n", runs);	
-	
-        mergeparam mergeblocks[thread];
+		mergeparam mergeblocks[thread];
 		pthread_t TID[thread];
-        for(i = 0; i < thread; i++) {
-
-            //integer values assigned to the first and second block in each pair to be merged
-            int first = i * 2;
-            int second = first + 1;
-
+		for(i = 0; i < thread; i++) {
+			//integer values assigned to the first and second block in each pair to be merged
+			int first = i * 2;
+			int second = first + 1;
 			//parameters assigned to be passed to the Merge Driver Function, which operates on pairs of blocks
-            mergeblocks[i].block1 = first * subitm;
-            mergeblocks[i].block2 = second * subitm;
+			mergeblocks[i].block1 = first * subitm;
+			mergeblocks[i].block2 = second * subitm;
 			mergeblocks[i].subitems = subitm;
 			mergeblocks[i].x = runs;
 
-            //create thread and pass the parameters to the Merge Driver Function
-            if(pthread_create(&TID[i], NULL, Merge, &mergeblocks[i])) {
-                printf("error in creating merge threads.\n");
-                exit(EXIT_FAILURE);
-            }
-        }
-        for(i = 0; i < thread; i++) {
-            if(pthread_join(TID[i], NULL)) {
-                printf("error in joining merge threads.\n");
-                exit(EXIT_FAILURE);
-            }
-        }
-     		
+			//create thread and pass the parameters to the Merge Driver Function
+			if(pthread_create(&TID[i], NULL, Merge, &mergeblocks[i])) {
+				printf("error in creating merge threads.\n");
+				exit(EXIT_FAILURE);
+			}
+		}
+
+		for(i = 0; i < thread; i++) {
+			if(pthread_join(TID[i], NULL)) {
+				printf("error in joining merge threads.\n");
+				exit(EXIT_FAILURE);
+			}
+		}
 		//after the run is complete, the tempory array is copied back to the original array, subitem size is updated, and thread value is halved as the program amount of blocks is halved
-        thread = thread/2;
+		thread = thread/2;
 		subitm = subitm * 2;
 		runs++;
 		memcpy(records, temprecord, sb.st_size);
-    } while(thread != 0);
+	} while(thread != 0);
 	
 	//end timer at end of algorithm
 	clock_t end = clock();
-
-    //unmap and free memory, close file
-    munmap(records, sb.st_size);
-    free(temprecord);
-    close(filedescrip);
-
-    //display algorithm runtime
-    printf("\nTotal time: %lu nanoseconds\n", end - begin);
-	
-	//exit program
-    return 0;
-
-	/* Algorithm for Main Function (Pseudo Code):
-
-		Input: arguments passed from the command line, which are:
-									 1.) Program name
-									 2.) Number of threads specified by the user, for purposes of testing
-									 3.) File name for objects to be sorted
-		       formatted as: <./Program> <number of threads> <name of file>
-		Function(Input):
-			handle I/O and arguments from command line
-			memory-map the file specified to an array of pointers containing objects
-			find file size, amount of items in the array, and amount of blocks to be merged
-			increment until objects are sorted
-				initialize parameters for blocks
-				pass blocks to Merge Driver, which sorts and merges the objects
-				write sorted blocks back into memory after run completes
-			free memory
-		Exit Program	
-	*/ 
+	//unmap and free memory, close file
+	munmap(records, sb.st_size);
+	free(temprecord);
+	close(filedescrip);
+	//display algorithm runtime
+	printf("\nTotal time: %lu nanoseconds\n", end - begin);
+	return 0;
 }
+
+/* Algorithm for Sorting Function (Pseudo Code)
+
+	Input: a single block to be sorted
+	Function(Input):
+		implement the pivot based qsort algorithm, part of the C library, on each unique block to be sorted
+	Exit thread, join adjacent threads, and return to Merge Driver
+*/
 void *SortFunc(void *param) {
-    sortparam *par = (sortparam*)param;
-        
+	sortparam *par = (sortparam*)param;
 	//start index in block of original array that needs to be sorted
-    int start = par -> blockindex;
-        
+	int start = par -> blockindex;
 	//utilize the C qsort function, passing in the original array, amount of items, object length, as well as string comparison function
-    clock_t QSortstart = clock();
+	clock_t QSortstart = clock();
 	qsort(&records[start], par -> itm, objln, compareFunc);
 	clock_t QSortend = clock();
-	
 	printf("Total time in Sorting thread: %lu nanoseconds\n", QSortend - QSortstart);
-		
-    pthread_exit(0);
-
-	
-	/* Algorithm for Sorting Function (Pseudo Code)
-
-		Input: a single block to be sorted
-		Function(Input):
-			implement the pivot based qsort algorithm, part of the C library, on each unique block to be sorted
-		Exit thread, join adjacent threads, and return to Merge Driver
-	*/
+	pthread_exit(0);
 }
 
+/* Note on strcmp function:
+		
+Compares two character arrays.
+Values returned:
+		1	signifies that string 2 is less that string 1
+		0	signifies that both strings are equivalent
+		   -1	signifies that string 1 is less than string 2
+*/
 //Note: const void *a and *b are void until a type is declared, so comparison functions for qsort are modular and can be modified depending on the type of data being passed to it
 int compareFunc(const void *a, const void *b) {
     
     //cast key values to character pointer arrays from the record values passed to the comparison function
     char *aa = ((record*)a) -> key;
     char *bb = ((record*)b) -> key;
-	
-    //use strcmp function, returns 1 or -1
+	//use strcmp function, returns 1 or -1
     return strcmp(aa, bb);
-
-
-	/* Note on strcmp function:
-		
-		Compares two character arrays.
-		Values returned:
-				1	signifies that string 2 is less that string 1
-				0	signifies that both strings are equivalent
-			       -1	signifies that string 1 is less than string 2
-	*/
 }
 
+
+/* Algorithm for Merge Driver (Pseudo Code):
+
+	Intput: parameters that contain two distinct blocks to be merged.
+	Function(Input):
+		run 0: sort phase, then merge sorted blocks.
+		run 1 ... run n: merge blocks until file is completely sorted
+	Exit thread, join adjacent threads in Main Function, and prepare for next run
+*/
 void *Merge(void *param) {
 	mergeparam *params = (mergeparam*)param;
-
 	//checks which phase the sort is currently in
     int run = params -> x;
 	int i;
-	
 	clock_t MergeDstart = clock();
 	
 	//run 0 is the sort phase
@@ -291,7 +260,6 @@ void *Merge(void *param) {
         pthread_t ThreadID[2];
         sortparam spar[2];
         for(i = 0; i < 2; i++) {
-
 			//initialize parameters for block being sorted
             if(i == 0) {
 				spar[i].blockindex = params -> block1;
@@ -300,17 +268,16 @@ void *Merge(void *param) {
 				spar[i].blockindex = params -> block2;
 			}
 			spar[i].itm = params -> subitems; 
-
 			//create two threads within the merge block, one for block 1 and the other for block 2
 
 			if(pthread_create(&ThreadID[i], NULL, SortFunc, &spar[i])) {
-                        	printf("error in creating sort thread.\n");
-                        	exit(EXIT_FAILURE);
-               		}
+				printf("error in creating sort thread.\n");
+				exit(EXIT_FAILURE);
+            }
         }
-        for(i = 0; i < 2; i++) {
-			
-            if(pthread_join(ThreadID[i], NULL)) {
+        
+		for(i = 0; i < 2; i++) {
+			if(pthread_join(ThreadID[i], NULL)) {
                 printf("error in joining sort thread.\n");
                 exit(EXIT_FAILURE);
             }
@@ -326,35 +293,33 @@ void *Merge(void *param) {
 	}
 
 	clock_t MergeDend = clock();
-	
 	printf("Total time in Merge Driver: %lu nanoseconds\n", MergeDend -  MergeDstart);
-	
 	pthread_exit(0);
-
-
-	/* Algorithm for Merge Driver (Pseudo Code):
-	
-		Intput: parameters that contain two distinct blocks to be merged.
-		Function(Input):
-			run 0: sort phase, then merge sorted blocks.
-			run 1 ... run n: merge blocks until file is completely sorted
-		Exit thread, join adjacent threads in Main Function, and prepare for next run
-	*/
 }
+
+/* Algorithm for Merge Function (Pseudo Code):
+
+	Input:  parameters that contain the two distinct sorted blocks to be merged
+	Function(Input):
+		increment along each separate block 
+			compare key values contained on the i index on each block
+				depending on which index contains the lower key value, update the temporary array starting incrementally the starting index of the first block
+		increment along both blocks separately while they still contain values not in the temporary array
+			update temporary array with these values
+	Return to Merge Driver 	
+*/
 
 void mergeFunc(mergeparam *params) {       
     //initializes the start indexes for both blocks being merged and the subitems within each block
     int first = params -> block1;
     int second = params -> block2;
     int subitem = params -> subitems;
-
-    //index to start within original array when comparing, needs to be start index of first block
+	//index to start within original array when comparing, needs to be start index of first block
     int i = params -> block1;
     
     //loop while value of first is less that start index of block 2 and second is less than end of block 2
 	clock_t MergeFstart = clock();
     while(first < params -> block2 && second < params -> block2 + subitem) {
-        
         //compare the key values at each index within each separate block
         if(compareFunc((void*)&records[first], (void*)&records[second]) > 0) {
             temprecord[i] = records[second];
@@ -381,19 +346,5 @@ void mergeFunc(mergeparam *params) {
     }
 
 	clock_t MergeFend = clock();
-
 	printf("Total time in Merge Function loop: %lu nanoseconds\n", MergeFend - MergeFstart);
-
-	
-	/* Algorithm for Merge Function (Pseudo Code):
-
-		Input:  parameters that contain the two distinct sorted blocks to be merged
-		Function(Input):
-			increment along each separate block 
-				compare key values contained on the i index on each block
-					depending on which index contains the lower key value, update the temporary array starting incrementally the starting index of the first block
-			increment along both blocks separately while they still contain values not in the temporary array
-				update temporary array with these values
-		Return to Merge Driver 	
-	*/
 }
